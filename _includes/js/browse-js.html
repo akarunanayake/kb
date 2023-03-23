@@ -1,4 +1,9 @@
 {%- assign fields = site.data.config-browse -%}
+{% assign filterFields = site.data.theme.search-fields %}
+{% assign min = site.data.theme.subjects-min | default: 1 %}
+{% assign stopwords = site.data.theme.subjects-stopwords %}
+{%- assign cloud-fields = filterFields | split: ";" -%}
+{%- assign facetedFields = site.data.config-search -%}
 <script>
 
 /* function to make each item card on page */
@@ -132,6 +137,7 @@ function pageInit(items) {
     query = "";
     filterItems(items,query);
   }
+    
 }
 
 var query = "";
@@ -189,5 +195,161 @@ $(".browse-sort-item").click(function (event) {
         filterItems(cb_items, query);
     }
 }); 
+
+//Add multislect dropdown functionality
+{% include js/virtual-select.min.js %}
+
+//Initializing multiselect dropdowns
+VirtualSelect.init({ 
+  ele: '.multiselect',
+  multiple: true,
+  search: true,
+  searchGroup: false, // Include group title for searching
+  searchByStartsWith: false, // Search options by startsWith() method
+});
+
+//Map to store all the filters applied
+var selectedOptions = new Map()
+
+//Multiselect on change
+$('.multiselect').change(function() {
+  query = this.value
+  $('#quickSearch').val(query);
+  //add filter to map
+  selectedOptions.set(this.name, query)
+  //call for filtering function
+  facetedFilter(selectedOptions, cb_items, query)
+});
+
+//Multiselect on reset
+$('.multiselect').on('reset',function() {
+  selectedOptions.delete(this.name)
+})
+
+//Set to keep filtered items
+var facetedFilterItems = new Set()
+
+//Function to get filtered items
+function facetedFilter(selectedOptions, items, query){
+	var hasAnyFilter = false;
+	itemsLength = items.length
+	if (selectedOptions.size > 0){
+		//Check whether there is an applied filter
+		for (let [key, value] of  selectedOptions.entries()) {
+			if(value.length > 0){
+				hasAnyFilter = true;
+				break;	
+			}
+		}
+		if(hasAnyFilter){//If the applied filters are available get filtered items based on that
+			facetedFilterItems = getFilteredItems(selectedOptions, items)
+		}else{//If there is no filters applied display all the elements
+			items.forEach(key => facetedFilterItems.add(key))
+		}
+			// add number 
+		  $("#numberOf").html(facetedFilterItems.size + " of " + itemsLength + " items");
+		  
+		  // add stuff, make cards first in giant var, then add all at once to speed things up
+		  var cards = "";
+		  for (var i = 0, len = facetedFilterItems.size; i < len; i++) {
+			cards += makeCard(Array.from(facetedFilterItems)[i]);
+		  }
+		  $("#browseItems").html(cards);
+
+		  // finish
+		  $("#goButton").focus();
+		  $("#loading").hide();
+		
+	}else{//If there is no filters applied display all the elements
+		 filterItems(items, query);
+	}
+}
+
+//Function to return elements based on the applied filters
+function getFilteredItems(selectedOptions, items){
+	var filterItemsSet = new Set();
+	for (let [key, value] of  selectedOptions.entries()) {
+			if(value.length > 0){//execute filter logic
+				filterItemsSet.clear()
+				 for(var n=0; n < value.length; n++){
+					var q = value[n].toString()
+					q = q.trim().toUpperCase(); 
+					for (var i = 0, len = items.length; i < len; i++) {
+					  var val = "";
+					  for (var k in items[i]) { val += items[i][k] + " "; }
+					  if(val.toUpperCase().indexOf(q) != -1){
+						filterItemsSet.add(items[i]);
+					  }
+					}
+				}
+			}
+			//Shrink items to filtered items 
+			if(filterItemsSet.size > 0){
+				items = []
+				filterItemsSet.forEach(key => items.push(key))
+			}
+	}
+	return filterItemsSet;
+}
+
+//Multiselect before open - set values to each dropdown
+$('.multiselect').on('beforeOpen', function() {
+    var raw_terms = [];//List to keep faceted value of each element
+	var  items = [];
+	var filterItemsSet = new Set();//Set to keep filtered items based on the applied filters
+	var otherSelectedOptions = new Map();//Map to keep applied filters otherthan the current filter
+	//Get other applied filters
+	for (let [key, value] of  selectedOptions.entries()) {
+		if(key != this.name){
+			otherSelectedOptions.set(key,value);
+		}
+	}
+	//Get filtered items only by other applied filters
+	filterItemsSet = getFilteredItems(otherSelectedOptions, cb_items)
+	if (filterItemsSet.size > 0){//If there are other filters get dropdown values based on filtered data
+		filterItemsSet.forEach(key => items.push(key))
+	}else{//If there is no other aplied filters get dropdown values based all elements
+		items = cb_items
+	}
+	var options =[]//List to dropdown values
+    // get faceted fields from metadata
+    for (var i = 0; i < items.length; i++) {
+        {% for f in facetedFields %}
+		
+		if({{f.field| jsonify}} == this.name){
+			if(items[i][{{ f.field | jsonify }}]) { raw_terms.push(items[i][{{ f.field | jsonify }}]); } 
+        }
+		{% endfor %}
+		
+    }
+    // split multivalued fields and clean up extra white space
+    const re = /\s*;+\s*/;
+    var clean_terms = raw_terms.join(";").toLowerCase().split(re);
+    // find unique terms
+    var unique_terms = clean_terms.filter(function(value, index, self) { return self.indexOf(value) === index; });
+    // count unique values and filter based on termsMin
+    var terms = [];
+    for (var i = 0; i < unique_terms.length; i++) {
+        var count = clean_terms.filter(function(t) { return t == unique_terms[i] }).length;
+        if (count >= {{ min | default: 1 }}) {
+            terms.push([unique_terms[i],count]);
+        }
+    }
+	//Create dropdown labels and values
+	for(var i=0; i< terms.length; i++){
+		var jsonObject = {}
+		jsonObject['label'] = terms[i][0]+"  ("+terms[i][1]+")"
+		jsonObject['value'] = terms[i][0]
+		options.push(jsonObject);
+	}
+	//Set options to dropdown
+	this.setOptions(options)
+	
+	//If there is an already selected value set that value as selected
+	if (selectedOptions.get(this.name) != null){
+		this.setValue(selectedOptions.get(this.name))
+	}
+	
+});
 
 </script>

@@ -29,7 +29,7 @@
 
 <!-- load custom css last to allow overrides -->
 <link rel="stylesheet" href="{{ '/assets/css/custom.css' | relative_url }}" type="text/css">
-
+<link rel="stylesheet" href="{{ '/assets/lib/virtual-select.min.css' | relative_url }}" type="text/css">
 <!-- add digital garden conditions -->
   {% if page.excerpt %}
   <meta property="og:description" content="{{ page.excerpt | strip_html | strip_newlines | truncate: 160 }}"/>
